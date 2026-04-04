@@ -3,12 +3,14 @@
 	import { aiService, type AIResult } from '$lib/services/ai';
 	import { emailService, generateMockEmails, type Email } from '$lib/services/email';
 	import { appStore } from '$lib/stores/app';
+	import { startOAuthFlow, hasValidTokens, type OAuthProvider } from '$lib/services/oauth';
 
 	let emails: Email[] = $state([]);
 	let isScanning = $state(false);
 	let scanProgress = $state(0);
 	let aiReady = $state(false);
 	let aiDevice = $state('loading...');
+	let isConnected = $state(hasValidTokens());
 	let selectedProvider = $state<'gmail' | 'outlook' | 'imap'>('gmail');
 
 	// IMAP config
@@ -19,7 +21,7 @@
 	let useTls = $state(true);
 
 	onMount(async () => {
-		// Initialize AI
+		// Initialize AI via worker
 		aiService.onLoadingProgress((progress, status) => {
 			console.log(`[AI] ${progress}% - ${status}`);
 			aiDevice = status;
@@ -29,6 +31,14 @@
 		aiReady = ok;
 		aiDevice = aiService.getDevice();
 	});
+
+	async function startOAuth(provider: OAuthProvider) {
+		try {
+			await startOAuthFlow(provider);
+		} catch (e) {
+			console.error('OAuth failed:', e);
+		}
+	}
 
 	async function startScan() {
 		isScanning = true;
@@ -45,7 +55,7 @@
 			const companies = emailService.groupByCompany(emails);
 			scanProgress = 50;
 
-			// Analyze each company with local AI
+			// Analyze each company with local AI (via worker)
 			const results: AIResult[] = [];
 			const companyEntries = Array.from(companies.entries());
 			const total = companyEntries.length;
@@ -130,7 +140,7 @@
 		</div>
 
 		{#if selectedProvider === 'gmail' || selectedProvider === 'outlook'}
-			<button class="btn btn-primary oauth-btn" onclick={() => window.location.href = '/auth/' + selectedProvider}>
+			<button class="btn btn-primary oauth-btn" onclick={() => startOAuth(selectedProvider)}>
 				🔐 Verbinden met {selectedProvider === 'gmail' ? 'Google' : 'Microsoft'}
 			</button>
 			<p class="oauth-note">

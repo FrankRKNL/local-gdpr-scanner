@@ -23,7 +23,7 @@
 	</header>
 
 	<main>
-		{@children}
+		{@render children()}
 	</main>
 
 	<footer>

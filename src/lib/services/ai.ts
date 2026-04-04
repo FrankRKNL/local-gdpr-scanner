@@ -1,248 +1,169 @@
 /**
- * AI Service - Local AI for GDPR personal data detection
- * Uses Qwen3 0.8B via @huggingface/transformers
- * 100% local, no external API calls
+ * AI Service - Uses Web Worker for non-blocking inference
+ * Routes to scanner.worker.ts for Qwen model execution
  */
 
-import { pipeline, env, type Pipeline } from '@huggingface/transformers';
-
-// Local model path - can be bundled with the app
-const MODEL_ID = 'onnx-community/Qwen3-0.8B-ONNX';
-
 export interface AIResult {
-	hasPersonalData: boolean;
-	dataTypes: string[];
-	confidence: number;
-	summary: string;
+    hasPersonalData: boolean;
+    dataTypes: string[];
+    confidence: number;
+    summary: string;
 }
 
 type LoadingCallback = (progress: number, status: string) => void;
-let loadingCallbacks: LoadingCallback[] = [];
+type ResultCallback = (result: AIResult) => void;
 
-let generator: Pipeline | null = null;
-let loadError: string | null = null;
-let loading = false;
+let worker: Worker | null = null;
+let loadingCallbacks: LoadingCallback[] = [];
+let pendingResults: Map<string, ResultCallback> = new Map();
+let conversationCounter = 0;
 
 export function onLoadingProgress(cb: LoadingCallback) {
-	loadingCallbacks.push(cb);
+    loadingCallbacks.push(cb);
 }
 
 function notifyLoading(progress: number, status: string) {
-	for (const cb of loadingCallbacks) {
-		cb(progress, status);
-	}
+    for (const cb of loadingCallbacks) {
+        cb(progress, status);
+    }
 }
 
 /**
- * Initialize the Qwen3 model via Transformers.js
- * Uses WebGPU if available, falls back to WASM then CPU
+ * Initialize the AI worker
  */
 export async function init(): Promise<boolean> {
-	if (generator) return true;
-	if (loading) return false;
-	loading = true;
-	loadError = null;
+    if (worker) return true;
 
-	try {
-		notifyLoading(10, 'Qwen3 model initialiseren...');
+    return new Promise((resolve) => {
+        try {
+            // Create worker using Vite's worker syntax
+            worker = new Worker(
+                new URL('$lib/workers/scanner.worker.ts', import.meta.url),
+                { type: 'module' }
+            );
 
-		// Try WebGPU first (fastest)
-		try {
-			notifyLoading(30, 'WebGPU proberen...');
-			env.allowLocalModels = false;
-			env.useBrowserCache = true;
+            worker.onmessage = (event) => {
+                const { type, status, data, result, conversationId } = event.data;
 
-			generator = await pipeline('text-generation', MODEL_ID, {
-				device: 'webgpu',
-				dtype: 'q4f16',
-			});
-			notifyLoading(100, 'Qwen3 geladen (WebGPU)');
-			loading = false;
-			return true;
-		} catch (e1) {
-			console.warn('[AI] WebGPU failed, trying WASM:', e1);
-			notifyLoading(30, 'WASM proberen...');
-		}
+                switch (type) {
+                    case 'log':
+                        notifyLoading(data.progress || 50, data.status);
+                        break;
+                    case 'loaded':
+                        resolve(data.success);
+                        break;
+                    case 'result':
+                        if (conversationId && pendingResults.has(conversationId)) {
+                            const cb = pendingResults.get(conversationId)!;
+                            pendingResults.delete(conversationId);
+                            cb(result);
+                        }
+                        break;
+                }
+            };
 
-		// Try WASM (good performance, no GPU needed)
-		try {
-			generator = await pipeline('text-generation', MODEL_ID, {
-				device: 'wasm',
-				dtype: 'q4',
-			});
-			notifyLoading(100, 'Qwen3 geladen (WASM)');
-			loading = false;
-			return true;
-		} catch (e2) {
-			console.warn('[AI] WASM failed, trying CPU:', e2);
-			notifyLoading(50, 'CPU proberen (langzamer)...');
-		}
+            worker.onerror = (e) => {
+                console.error('[AI Worker error]', e);
+                resolve(false);
+            };
 
-		// Fallback to CPU (slow but works)
-		generator = await pipeline('text-generation', MODEL_ID, {
-			device: 'cpu',
-			dtype: 'q4',
-		});
-		notifyLoading(100, 'Qwen3 geladen (CPU - langzaam)');
-		loading = false;
-		return true;
+            // Send load command to worker
+            worker.postMessage({ action: 'load' });
 
-	} catch (e) {
-		console.error('[AI] Failed to load model:', e);
-		loadError = e instanceof Error ? e.message : 'Unknown error';
-		loading = false;
-		return false;
-	}
+        } catch (e) {
+            console.error('[AI] Failed to create worker:', e);
+            resolve(false);
+        }
+    });
 }
 
 export function isLoaded(): boolean {
-	return generator !== null;
+    return worker !== null;
 }
 
 export function getLoadError(): string | null {
-	return loadError;
+    return null; // Worker handles its own errors
 }
 
 export function getDevice(): string {
-	if (!generator) return 'none';
-	// Return device info based on model config
-	return 'local';
+    return worker ? 'worker' : 'none';
 }
 
 /**
- * Analyze emails from a company
- * Returns simple 0 (no personal data) or 1 (has personal data)
+ * Analyze emails from a company - returns promise with AI result
  */
 export async function analyzeCompany(
-	companyName: string,
-	emails: { subject: string; body: string }[]
+    companyName: string,
+    emails: { subject: string; body: string }[]
 ): Promise<AIResult> {
-	// If model not loaded, use pattern matching fallback
-	if (!generator) {
-		const patterns = detectPatterns(emails);
-		return {
-			hasPersonalData: patterns.length > 0,
-			dataTypes: patterns,
-			confidence: 0.3,
-			summary: patterns.length > 0
-				? `Gevonden via patronen: ${patterns.slice(0, 3).join(', ')}`
-				: 'Geen persoonsgegevens gedetecteerd',
-		};
-	}
+    if (!worker) {
+        // Fallback to pattern matching if worker not ready
+        return patternFallback(emails);
+    }
 
-	try {
-		// Build prompt in Dutch - ask for simple yes/no (0/1)
-		const emailTexts = emails.slice(0, 5).map(e =>
-			`- ${e.subject}\n  ${e.body.slice(0, 200)}`
-		).join('\n');
+    return new Promise((resolve) => {
+        const conversationId = `conv-${++conversationCounter}`;
+        pendingResults.set(conversationId, resolve);
 
-		const prompt = `Analyseer deze emails van "${companyName}".
+        worker!.postMessage({
+            action: 'analyze',
+            companyName,
+            emails,
+            conversationId,
+        });
 
-Emails:
-${emailTexts}
-
-Beantwoord met ALLEEN een cijfer:
-- 1 = dit bedrijf heeft mogelijk persoonsgegevens
-- 0 = dit bedrijf heeft geen persoonsgegevens
-
-Antwoord:`;
-
-		// Generate using local model
-		const output = await generator(prompt, {
-			max_new_tokens: 10,
-			do_sample: false,
-			temperature: 0.1,
-		});
-
-		const response = output[0]?.generated_text?.trim() || '';
-		console.log('[AI] Qwen3 response:', response);
-
-		// Parse simple 0/1 response
-		const hasPersonalData = response.includes('1');
-
-		return {
-			hasPersonalData,
-			dataTypes: hasPersonalData ? ['email', 'naam'] : [],
-			confidence: hasPersonalData ? 0.8 : 0.9,
-			summary: hasPersonalData
-				? 'Lokale AI: mogelijk persoonsgegevens gedetecteerd'
-				: 'Lokale AI: geen persoonsgegevens',
-		};
-	} catch (e) {
-		console.error('[AI] Analysis failed:', e);
-		// Fallback to patterns
-		const patterns = detectPatterns(emails);
-		return {
-			hasPersonalData: patterns.length > 0,
-			dataTypes: patterns,
-			confidence: 0.3,
-			summary: patterns.length > 0
-				? `Gevonden via patronen: ${patterns.slice(0, 3).join(', ')}`
-				: 'Analyse mislukt, geen patronen gevonden',
-		};
-	}
+        // Timeout after 60 seconds
+        setTimeout(() => {
+            if (pendingResults.has(conversationId)) {
+                pendingResults.delete(conversationId);
+                resolve({
+                    hasPersonalData: false,
+                    dataTypes: [],
+                    confidence: 0,
+                    summary: 'Timeout - AI te langzaam',
+                });
+            }
+        }, 60000);
+    });
 }
 
 /**
  * Pattern-based fallback detection
- * Works without any AI model
  */
-function detectPatterns(emails: { subject: string; body: string }[]): string[] {
-	const allText = emails.map(e => `${e.subject} ${e.body}`).join('\n').toLowerCase();
-	const types: string[] = [];
+function patternFallback(emails: { subject: string; body: string }[]): AIResult {
+    const allText = emails.map(e => `${e.subject} ${e.body}`).join('\n').toLowerCase();
+    const types: string[] = [];
 
-	// Email addresses
-	if (/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/.test(allText)) {
-		types.push('email');
-	}
+    if (/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/.test(allText)) types.push('email');
+    if (/\b(?:\+31|0)[6][1-9]\d{7,8}\b/.test(allText)) types.push('telefoon');
+    if (/\bNL\d{2}[A-Z]{4}\d{10}\b/.test(allText)) types.push('bankrekening');
+    if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(allText)) types.push('ip-adres');
+    if (/bank|rekening|betalen|bedrag|€|factuur|iban/i.test(allText)) types.push('financieel');
+    if (/straat|weg|laan|plein|huisnummer|postcode|\d{4}\s?[A-Z]{2}/i.test(allText)) types.push('adres');
+    if (/geboortedatum|geboren|geboorte/i.test(allText)) types.push('geboortedatum');
+    if (/medisch|gezondheid|arts|ziekenhuis|patient/i.test(allText)) types.push('medisch');
+    if (/werk|baan|werkgever|salaris/i.test(allText)) types.push('werkgegevens');
 
-	// Dutch phone numbers
-	if (/\b(?:\+31|0)[6][1-9]\d{7,8}\b/.test(allText)) {
-		types.push('telefoon');
-	}
-
-	// IBAN
-	if (/\bNL\d{2}[A-Z]{4}\d{10}\b/.test(allText)) {
-		types.push('bankrekening');
-	}
-
-	// IP addresses
-	if (/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/.test(allText)) {
-		types.push('ip-adres');
-	}
-
-	// Financial data
-	if (/bank|rekening|betalen|bedrag|€|factuur|iban/i.test(allText)) {
-		types.push('financieel');
-	}
-
-	// Address patterns (Dutch)
-	if (/straat|weg|laan|plein|huisnummer|postcode|\d{4}\s?[A-Z]{2}/i.test(allText)) {
-		types.push('adres');
-	}
-
-	// Date of birth
-	if (/geboortedatum|geboren|geboorte/i.test(allText)) {
-		types.push('geboortedatum');
-	}
-
-	// Medical
-	if (/medisch|gezondheid|arts|ziekenhuis|patient/i.test(allText)) {
-		types.push('medisch');
-	}
-
-	// Employment
-	if (/werk|baan|werkgever|salaris/i.test(allText)) {
-		types.push('werkgegevens');
-	}
-
-	return types;
+    return {
+        hasPersonalData: types.length > 0,
+        dataTypes: types,
+        confidence: 0.3,
+        summary: types.length > 0
+            ? `Gevonden via patronen: ${types.slice(0, 3).join(', ')}`
+            : 'Geen persoonsgegevens gedetecteerd',
+    };
 }
 
 export async function test(): Promise<boolean> {
-	if (!generator) {
-		const ok = await init();
-		if (!ok) return false;
-	}
-	return true;
+    return init();
 }
+
+export const aiService = {
+    init,
+    isLoaded,
+    getLoadError,
+    getDevice,
+    analyzeCompany,
+    onLoadingProgress,
+    test,
+};

@@ -17,10 +17,9 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-tauri-plugin-google-auth = "2"
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-lettre = { version = "0.22", features = ["tokio1-native-tls", "smtp-transport", "rustls-tls", "imap", "builder"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 tracing = "0.1"
