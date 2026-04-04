@@ -18,6 +18,7 @@
 		<nav>
 			<a href="/">Scanner</a>
 			<a href="/results">Resultaten</a>
+			<a href="/tools/avg-brief">AVG Brief</a>
 			<a href="/settings">Instellingen</a>
 		</nav>
 	</header>

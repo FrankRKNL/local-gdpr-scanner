@@ -66,9 +66,9 @@
 								<button class="btn btn-secondary">
 									📧 Bekijk emails
 								</button>
-								<button class="btn btn-primary">
+								<a href="/tools/avg-brief?company={encodeURIComponent(company.name)}&domain={encodeURIComponent(company.domain)}" class="btn btn-primary">
 									📝 AVG brief genereren
-								</button>
+								</a>
 							</div>
 						</div>
 					{/each}
