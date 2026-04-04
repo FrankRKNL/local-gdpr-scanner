@@ -1,25 +1,26 @@
 //! IMAP module for email connectivity
 //! Uses async-imap with tokio runtime for Tauri v2
 
-use async_imap::types::{Flag, Message};
+use async_imap::types::Flag;
 use async_imap::{Client, Session, Stream};
 use async_native_tls::TlsConnector;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::TcpStream as TokioTcpStream;
-use tokio::task;
+use tokio::io::BufStream;
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 /// IMAP connection state stored in app
 pub struct ImapState {
-    session: Mutex<Option<Session<Stream<TokioTcpStream>>>>,
+    session: Arc<Mutex<Option<Session<Stream<TokioTcpStream>>>>>,
 }
 
 impl Default for ImapState {
     fn default() -> Self {
         Self {
-            session: Mutex::new(None),
+            session: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -84,7 +85,7 @@ pub async fn connect(
         let username = username.clone();
         let password = password.clone();
         move || {
-            // Create TCP stream (sync wrapper for blocking context)
+            // Create blocking TCP stream
             let tcp = std::net::TcpStream::connect(format!("{}:{}", host, port))
                 .map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
             
@@ -93,7 +94,7 @@ pub async fn connect(
             tcp.set_write_timeout(Some(std::time::Duration::from_secs(30)))
                 .ok();
 
-            let stream: Stream<async_imap::TcpStream>;
+            let stream: Stream<std::net::TcpStream>;
 
             if use_tls {
                 // TLS connection on port 993
@@ -122,9 +123,9 @@ pub async fn connect(
             Ok(session)
         }
     }).await
-    .map_err(|e| ImapError::ConnectionFailed(e.to_string()))?;
+    .map_err(|e| ImapError::ConnectionFailed(e.to_string()))??;
 
-    let mut s = state.session.lock().unwrap();
+    let mut s = state.session.lock().await;
     *s = Some(session);
     Ok(true)
 }
@@ -133,12 +134,11 @@ pub async fn connect(
 #[tauri::command]
 pub async fn disconnect(state: tauri::State<'_, ImapState>) -> Result<bool, ImapError> {
     info!("IMAP disconnecting");
-    let mut s = state.session.lock().unwrap();
+    let mut s = state.session.lock().await;
     if let Some(session) = s.take() {
-        match task::spawn_blocking(|| session.logout()).await {
-            Ok(Ok(_)) => info!("IMAP logged out"),
-            Ok(Err(e)) => warn!("IMAP logout error: {}", e),
-            Err(e) => warn!("IMAP logout task error: {}", e),
+        match session.clone().logout().await {
+            Ok(_) => info!("IMAP logged out"),
+            Err(e) => warn!("IMAP logout error: {}", e),
         }
     }
     Ok(true)
@@ -147,7 +147,7 @@ pub async fn disconnect(state: tauri::State<'_, ImapState>) -> Result<bool, Imap
 /// Check connection status
 #[tauri::command]
 pub async fn is_connected(state: tauri::State<'_, ImapState>) -> Result<bool, ImapError> {
-    let s = state.session.lock().unwrap();
+    let s = state.session.lock().await;
     Ok(s.is_some())
 }
 
@@ -157,25 +157,18 @@ pub async fn list_mailboxes(
     state: tauri::State<'_, ImapState>,
 ) -> Result<Vec<String>, ImapError> {
     let session = {
-        let s = state.session.lock().unwrap();
+        let s = state.session.lock().await;
         s.as_ref().ok_or(ImapError::NotConnected)?.clone()
     };
 
-    let mailboxes = task::spawn_blocking(move || {
-        let list = session.list("", "*");
-        match list {
-            Ok(mailboxes) => {
-                mailboxes
-                    .iter()
-                    .filter_map(|m| {
-                        let name = m.name().to_string();
-                        if name.is_empty() { None } else { Some(name) }
-                    })
-                    .collect()
-            }
-            Err(_) => vec!["INBOX".to_string()],
-        }
-    }).await.map_err(|e| ImapError::ImapError(e.to_string()))?;
+    let mailboxes = session.list("", "*")
+        .map_err(|e| ImapError::ImapError(e.to_string()))?
+        .iter()
+        .filter_map(|m| {
+            let name = m.name().to_string();
+            if name.is_empty() { None } else { Some(name) }
+        })
+        .collect();
 
     Ok(mailboxes)
 }
@@ -188,105 +181,106 @@ pub async fn fetch_emails(
     state: tauri::State<'_, ImapState>,
 ) -> Result<FetchResult, ImapError> {
     let session = {
-        let s = state.session.lock().unwrap();
+        let s = state.session.lock().await;
         s.as_ref().ok_or(ImapError::NotConnected)?.clone()
     };
 
     let limit = limit.unwrap_or(50).min(500) as usize;
 
-    let emails = task::spawn_blocking(move || {
-        // Select mailbox
-        let _ = session.select(&mailbox).or_else(|_| session.select("INBOX"));
+    let emails = fetch_emails_impl(session, mailbox, limit).await?;
 
-        // Search for all emails
-        let search = session.search("ALL");
-        if search.is_err() {
-            return vec![];
-        }
-
-        let uids: Vec<u32> = search.unwrap().into();
-        if uids.is_empty() {
-            return vec![];
-        }
-
-        // Take most recent emails
-        let uids: Vec<u32> = uids.into_iter().rev().take(limit).collect();
-
-        if uids.is_empty() {
-            return vec![];
-        }
-
-        // Fetch email data - build sequence string like "1,2,3"
-        let sequence = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
-
-        let fetch_result = session.fetch(&sequence, "ENVELOPE INTERNALDATE RFC822");
-        if fetch_result.is_err() {
-            return vec![];
-        }
-
-        let messages: Vec<Message> = fetch_result.unwrap();
-        let mut emails = vec![];
-
-        for msg in messages {
-            let uid = msg.uid().unwrap_or(0);
-            let envelope = msg.envelope();
-            let date = msg.internal_date().map(|d| d.to_string()).unwrap_or_default();
-
-            let from = envelope
-                .and_then(|e| e.from())
-                .and_then(|f| f.first())
-                .map(|f| {
-                    let addr = f.address()?;
-                    String::from_utf8_lossy(addr.as_str().unwrap_or(&[])).to_string()
-                })
-                .unwrap_or_default();
-
-            let subject = envelope
-                .and_then(|e| e.subject())
-                .map(|s| String::from_utf8_lossy(s).to_string())
-                .unwrap_or_default();
-
-            let flags: Vec<String> = msg.flags()
-                .iter()
-                .map(|f| match f {
-                    Flag::Seen => "seen",
-                    Flag::Answered => "answered",
-                    Flag::Flagged => "flagged",
-                    Flag::Deleted => "deleted",
-                    Flag::Draft => "draft",
-                    Flag::Recent => "recent",
-                    _ => "other",
-                })
-                .map(String::from)
-                .collect();
-
-            let rfc822 = msg.body()
-                .map(|b| String::from_utf8_lossy(b).to_string())
-                .unwrap_or_default();
-            let (body, body_html) = parse_email_body(&rfc822);
-
-            emails.push(EmailMessage {
-                id: uid.to_string(),
-                uid,
-                from,
-                from_name: None,
-                to: String::new(),
-                subject,
-                date,
-                body,
-                body_html,
-                has_attachments: msg.flags().contains(&Flag::Attachment),
-                flags,
-            });
-        }
-
-        emails
-    }).await.map_err(|e| ImapError::ImapError(e.to_string()))?;
-
-    let total = emails.len() as u32;
     info!("Fetched {} emails", emails.len());
+    Ok(FetchResult { emails, total: emails.len() as u32 })
+}
 
-    Ok(FetchResult { emails, total })
+async fn fetch_emails_impl(
+    mut session: Session<Stream<TokioTcpStream>>,
+    mailbox: String,
+    limit: usize,
+) -> Result<Vec<EmailMessage>, ImapError> {
+    // Select mailbox
+    let _ = session.select(&mailbox).or_else(|_| session.select("INBOX"));
+
+    // Search for all emails
+    let search = session.search("ALL")
+        .await
+        .map_err(|e| ImapError::ImapError(e.to_string()))?;
+
+    let uids: Vec<u32> = search.into();
+    if uids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Take most recent emails
+    let uids: Vec<u32> = uids.into_iter().rev().take(limit).collect();
+    if uids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Build sequence string like "1,2,3"
+    let sequence = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+
+    // Fetch email data
+    let messages = session.fetch(&sequence, "ENVELOPE INTERNALDATE RFC822")
+        .await
+        .map_err(|e| ImapError::ImapError(e.to_string()))?;
+
+    let mut emails = vec![];
+
+    for msg in messages {
+        let uid = msg.uid().unwrap_or(0);
+        let envelope = msg.envelope();
+        let date = msg.internal_date().map(|d| d.to_string()).unwrap_or_default();
+
+        let from = envelope
+            .and_then(|e| e.from())
+            .and_then(|f| f.first())
+            .map(|f| {
+                let addr = f.address()?;
+                String::from_utf8_lossy(addr.as_str().unwrap_or(&[])).to_string()
+            })
+            .unwrap_or_default();
+
+        let subject = envelope
+            .and_then(|e| e.subject())
+            .map(|s| String::from_utf8_lossy(s).to_string())
+            .unwrap_or_default();
+
+        let flags: Vec<String> = msg.flags()
+            .iter()
+            .map(|f| match f {
+                Flag::Seen => "seen",
+                Flag::Answered => "answered",
+                Flag::Flagged => "flagged",
+                Flag::Deleted => "deleted",
+                Flag::Draft => "draft",
+                Flag::Recent => "recent",
+                _ => "other",
+            })
+            .map(String::from)
+            .collect();
+
+        let rfc822 = msg.body()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .unwrap_or_default();
+        let (body, body_html) = parse_email_body(&rfc822);
+
+        emails.push(EmailMessage {
+            id: uid.to_string(),
+            uid,
+            from,
+            from_name: None,
+            to: String::new(),
+            subject,
+            date,
+            body,
+            body_html,
+            has_attachments: msg.flags().contains(&Flag::Attachment),
+            flags,
+        });
+    }
+
+    Ok(emails)
 }
 
 /// Search emails
@@ -298,81 +292,75 @@ pub async fn search_emails(
     state: tauri::State<'_, ImapState>,
 ) -> Result<FetchResult, ImapError> {
     let session = {
-        let s = state.session.lock().unwrap();
+        let s = state.session.lock().await;
         s.as_ref().ok_or(ImapError::NotConnected)?.clone()
     };
 
     let limit = limit.unwrap_or(50).min(500) as usize;
 
-    let emails = task::spawn_blocking(move || {
-        let _ = session.select(&mailbox).or_else(|_| session.select("INBOX"));
+    // Select mailbox
+    let _ = session.select(&mailbox).or_else(|_| session.select("INBOX"));
 
-        let search = session.search(&query);
-        if search.is_err() {
-            return vec![];
-        }
+    // Search
+    let search = session.search(&query)
+        .await
+        .map_err(|e| ImapError::ImapError(e.to_string()))?;
 
-        let uids: Vec<u32> = search.unwrap().into();
-        if uids.is_empty() {
-            return vec![];
-        }
+    let uids: Vec<u32> = search.into();
+    if uids.is_empty() {
+        return Ok(FetchResult { emails: vec![], total: 0 });
+    }
 
-        let uids: Vec<u32> = uids.into_iter().rev().take(limit).collect();
+    let uids: Vec<u32> = uids.into_iter().rev().take(limit).collect();
+    if uids.is_empty() {
+        return Ok(FetchResult { emails: vec![], total: 0 });
+    }
 
-        if uids.is_empty() {
-            return vec![];
-        }
+    let sequence = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
 
-        let sequence = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+    let messages = session.fetch(&sequence, "ENVELOPE INTERNALDATE RFC822")
+        .await
+        .map_err(|e| ImapError::ImapError(e.to_string()))?;
 
-        let fetch_result = session.fetch(&sequence, "ENVELOPE INTERNALDATE RFC822");
-        if fetch_result.is_err() {
-            return vec![];
-        }
+    let mut emails = vec![];
 
-        let messages: Vec<Message> = fetch_result.unwrap();
-        let mut emails = vec![];
+    for msg in messages {
+        let uid = msg.uid().unwrap_or(0);
+        let envelope = msg.envelope();
 
-        for msg in messages {
-            let uid = msg.uid().unwrap_or(0);
-            let envelope = msg.envelope();
+        let from = envelope
+            .and_then(|e| e.from())
+            .and_then(|f| f.first())
+            .map(|f| {
+                let addr = f.address()?;
+                String::from_utf8_lossy(addr.as_str().unwrap_or(&[])).to_string()
+            })
+            .unwrap_or_default();
 
-            let from = envelope
-                .and_then(|e| e.from())
-                .and_then(|f| f.first())
-                .map(|f| {
-                    let addr = f.address()?;
-                    String::from_utf8_lossy(addr.as_str().unwrap_or(&[])).to_string()
-                })
-                .unwrap_or_default();
+        let subject = envelope
+            .and_then(|e| e.subject())
+            .map(|s| String::from_utf8_lossy(s).to_string())
+            .unwrap_or_default();
 
-            let subject = envelope
-                .and_then(|e| e.subject())
-                .map(|s| String::from_utf8_lossy(s).to_string())
-                .unwrap_or_default();
+        let rfc822 = msg.body()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .unwrap_or_default();
+        let (body, body_html) = parse_email_body(&rfc822);
 
-            let rfc822 = msg.body()
-                .map(|b| String::from_utf8_lossy(b).to_string())
-                .unwrap_or_default();
-            let (body, body_html) = parse_email_body(&rfc822);
-
-            emails.push(EmailMessage {
-                id: uid.to_string(),
-                uid,
-                from,
-                from_name: None,
-                to: String::new(),
-                subject,
-                date: String::new(),
-                body,
-                body_html,
-                has_attachments: false,
-                flags: vec![],
-            });
-        }
-
-        emails
-    }).await.map_err(|e| ImapError::ImapError(e.to_string()))?;
+        emails.push(EmailMessage {
+            id: uid.to_string(),
+            uid,
+            from,
+            from_name: None,
+            to: String::new(),
+            subject,
+            date: String::new(),
+            body,
+            body_html,
+            has_attachments: false,
+            flags: vec![],
+        });
+    }
 
     Ok(FetchResult { emails, total: emails.len() as u32 })
 }
