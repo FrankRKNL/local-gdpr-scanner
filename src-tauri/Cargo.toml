@@ -26,6 +26,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
+# IMAP support
+async-imap = "0.9"
+native-tls = "0.2"
+mail-parser = "0.9"
+
+# TLS
+openssl = "0.10"
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

@@ -5,8 +5,8 @@
 
 import { pipeline, env, type Pipeline } from '@huggingface/transformers';
 
-// Model: Qwen2.5 0.8B ONNX - optimized for local inference
-const MODEL_ID = 'onnx-community/Qwen2.5-0.8B-Instruct';
+// Model: Qwen3.5 0.8B ONNX - released March 2026
+const MODEL_ID = 'huggingworld/Qwen3.5-0.8B-ONNX';
 
 let generator: Pipeline | null = null;
 let loading = false;
