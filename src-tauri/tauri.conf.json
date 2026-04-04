@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.localgdpr.scanner",
   "build": {
+    "devtools": true,
     "frontendDist": "../build",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",

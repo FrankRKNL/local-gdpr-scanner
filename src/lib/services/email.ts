@@ -69,8 +69,8 @@ const KNOWN_COMPANIES: Record<string, { category: CompanyCategory; domain: strin
 	'apple.com': { category: 'tech', domain: 'apple.com' },
 };
 
-function extractDomain(email: string): string {
-	const parts = email.split('@');
+function extractDomain(emailAddr: string): string {
+	const parts = emailAddr.split('@');
 	return parts.length === 2 ? parts[1].toLowerCase() : '';
 }
 
@@ -122,20 +122,21 @@ export interface EmailService {
 	connect(config: IMAPConfig): Promise<boolean>;
 	disconnect(): Promise<void>;
 	isConnected(): Promise<boolean>;
-	fetchEmails(options?: { limit?: number; startDate?: Date; endDate?: Date }): Promise<Email[]>;
+	fetchEmails(options?: { limit?: number; mailbox?: string }): Promise<Email[]>;
 }
 
 class TauriEmailService implements EmailService {
 	async connect(config: IMAPConfig): Promise<boolean> {
 		try {
-			const response = await invoke<{ success: boolean; error?: string }>('connect', {
+			// Note: imap commands use underscore naming convention
+			const response = await invoke<boolean>('imap::connect', {
 				host: config.host,
 				port: config.port,
 				username: config.username,
 				password: config.password,
-				useTls: config.secure,
+				use_tls: config.secure,
 			});
-			return response.success;
+			return response;
 		} catch (error) {
 			console.error('[Email] Connection error:', error);
 			return false;
@@ -143,27 +144,32 @@ class TauriEmailService implements EmailService {
 	}
 
 	async disconnect(): Promise<void> {
-		await invoke('disconnect');
+		try {
+			await invoke<boolean>('imap::disconnect');
+		} catch (error) {
+			console.error('[Email] Disconnect error:', error);
+		}
 	}
 
 	async isConnected(): Promise<boolean> {
 		try {
-			return await invoke<boolean>('is_connected');
+			return await invoke<boolean>('imap::is_connected');
 		} catch {
 			return false;
 		}
 	}
 
-	async fetchEmails(options?: { limit?: number }): Promise<Email[]> {
+	async fetchEmails(options?: { limit?: number; mailbox?: string }): Promise<Email[]> {
 		const limit = options?.limit || 200;
+		const mailbox = options?.mailbox || 'INBOX';
 		try {
-			const response = await invoke<{ emails: any[]; total: number }>('fetch_emails', {
-				folder: 'INBOX',
+			const response = await invoke<{ emails: any[]; total: number }>('imap::fetch_emails', {
+				mailbox,
 				limit,
 			});
 			return response.emails.map((e) => ({
 				id: e.id || crypto.randomUUID(),
-				from: e.from,
+				from: e.from || '',
 				fromName: e.from_name || null,
 				to: e.to || '',
 				subject: e.subject || '(Geen onderwerp)',
@@ -185,14 +191,14 @@ export const emailService: EmailService = new TauriEmailService();
  */
 export function generateMockEmails(count: number): Email[] {
 	const companies = [
-		{ from: 'noreply@bol.com', name: 'Bol.com', category: 'ecommerce' },
-		{ from: 'nieuwsbrief@nu.nl', name: 'NU.nl', category: 'newsletter' },
-		{ from: 'info@ing.nl', name: 'ING Bank', category: 'banking' },
-		{ from: 'marketing@coolblue.nl', name: 'Coolblue', category: 'ecommerce' },
-		{ from: 'noreply@linkedin.com', name: 'LinkedIn', category: 'social' },
-		{ from: 'noreply@spotify.com', name: 'Spotify', category: 'entertainment' },
-		{ from: 'info@kpn.nl', name: 'KPN', category: 'telecom' },
-		{ from: 'klant@ziggo.nl', name: 'Ziggo', category: 'telecom' },
+		{ from: 'noreply@bol.com', name: 'Bol.com', category: 'ecommerce' as CompanyCategory },
+		{ from: 'nieuwsbrief@nu.nl', name: 'NU.nl', category: 'newsletter' as CompanyCategory },
+		{ from: 'info@ing.nl', name: 'ING Bank', category: 'banking' as CompanyCategory },
+		{ from: 'marketing@coolblue.nl', name: 'Coolblue', category: 'ecommerce' as CompanyCategory },
+		{ from: 'noreply@linkedin.com', name: 'LinkedIn', category: 'social' as CompanyCategory },
+		{ from: 'noreply@spotify.com', name: 'Spotify', category: 'entertainment' as CompanyCategory },
+		{ from: 'info@kpn.nl', name: 'KPN', category: 'telecom' as CompanyCategory },
+		{ from: 'klant@ziggo.nl', name: 'Ziggo', category: 'telecom' as CompanyCategory },
 	];
 
 	const subjects = [
