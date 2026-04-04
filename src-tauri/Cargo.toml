@@ -28,10 +28,10 @@ tracing-appender = "0.2"
 
 # IMAP support
 async-imap = "0.9"
-native-tls = "0.2"
+async-native-tls = "0.3"
 mail-parser = "0.9"
 
-# TLS
+# TLS (for native-tls compatibility)
 openssl = "0.10"
 
 [profile.release]
