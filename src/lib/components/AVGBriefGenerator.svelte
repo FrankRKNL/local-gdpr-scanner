@@ -109,6 +109,78 @@
         URL.revokeObjectURL(url);
     }
 
+    function downloadPdf() {
+        // @ts-ignore
+        const { jsPDF } = window.jspdf;
+        if (!jsPDF) {
+            alert('PDF bibliotheek laden mislukt. Probeer HTML download.');
+            return;
+        }
+        
+        const doc = new jsPDF();
+        
+        let y = 20;
+        const lineHeight = 7;
+        
+        doc.setFont('helvetica');
+        
+        // Header
+        doc.setFontSize(16);
+        doc.text('AVG Verwijderingsverzoek', 20, y);
+        y += lineHeight * 2;
+        
+        // Date
+        doc.setFontSize(10);
+        doc.text(`Datum: ${new Date().toLocaleDateString('nl-NL')}`, 20, y);
+        y += lineHeight * 2;
+        
+        // Company
+        doc.setFontSize(11);
+        doc.text(`Aan: ${customCompany || selectedCompany}`, 20, y);
+        y += lineHeight;
+        if (customAddress) {
+            const addrLines = customAddress.split('\n');
+            for (const line of addrLines) {
+                doc.text(line, 20, y);
+                y += lineHeight;
+            }
+        }
+        y += lineHeight;
+        
+        // Subject
+        doc.setFontSize(12);
+        doc.text('Betreft: Verzoek tot verwijdering (Art. 17 AVG)', 20, y);
+        y += lineHeight * 2;
+        
+        // Salutation
+        doc.setFontSize(11);
+        doc.text('Geachte heer/mevrouw,', 20, y);
+        y += lineHeight * 2;
+        
+        // Body
+        const bodyText = [
+            'Hierbij dien ik formeel een verzoek in op grond van de AVG.',
+            '',
+            'Ik verzoek u alle persoonsgegevens te verwijderen.',
+            '',
+            'Indien er een gegronde reden is, verzoek ik u mij binnen 30 dagen te informeren.',
+            '',
+            'Bij weigering kan ik een klacht indienen bij de AP.',
+        ];
+        
+        for (const line of bodyText) {
+            doc.text(line, 20, y);
+            y += lineHeight;
+        }
+        
+        y += lineHeight;
+        doc.text('Met vriendelijke groet,', 20, y);
+        y += lineHeight * 2;
+        doc.text(userFullName || '[Uw naam]', 20, y);
+        
+        doc.save(`avg-verwijderingsverzoek-${(customCompany || selectedCompany || 'custom').replace(/\s+/g, '-')}.pdf`);
+    }
+    
     function printLetter() {
         const printWindow = window.open('', '_blank');
         if (printWindow && previewHtml) {
@@ -228,6 +300,9 @@
 
         {#if showPreview}
             <div class="preview-actions">
+                <button class="btn btn-secondary" onclick={downloadPdf}>
+                    📄 Download PDF
+                </button>
                 <button class="btn btn-secondary" onclick={downloadHtml}>
                     📥 Download HTML
                 </button>
