@@ -17,6 +17,7 @@
 		</div>
 		<nav>
 			<a href="/">Scanner</a>
+			<a href="/dashboard">Dashboard</a>
 			<a href="/results">Resultaten</a>
 			<a href="/tools/avg-brief">AVG Brief</a>
 			<a href="/settings">Instellingen</a>

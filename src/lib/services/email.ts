@@ -17,6 +17,17 @@ export interface Email {
 	body: string;
 	hasAttachments: boolean;
 	companyId?: string;
+	emailType?: EmailType;
+}
+
+export interface CompanyEmailSummary {
+	companyName: string;
+	domain: string;
+	category: CompanyCategory;
+	totalEmails: number;
+	emailTypes: Record<EmailType, number>;
+	latestEmail: Date;
+	hasPersonalData: boolean;
 }
 
 export interface IMAPConfig {
@@ -38,6 +49,62 @@ export type CompanyCategory =
 	| 'entertainment'
 	| 'tech'
 	| 'other';
+
+export type EmailType = 'transactional' | 'promotional' | 'newsletter' | 'notification';
+
+// Email type detection
+export function detectEmailType(subject: string, body: string): EmailType {
+	const text = `${subject} ${body}`.toLowerCase();
+
+	// Transactional indicators
+	if (
+		text.includes('factuur') ||
+		text.includes('orderbevestiging') ||
+		text.includes('bestelling') ||
+		text.includes('verzonden') ||
+		text.includes('levering') ||
+		text.includes('betaling') ||
+		text.includes('account') ||
+		text.includes('wachtwoord')
+	) {
+		return 'transactional';
+	}
+
+	// Promotional indicators
+	if (
+		text.includes('korting') ||
+		text.includes('aanbieding') ||
+		text.includes('sale') ||
+		text.includes('nu kopen') ||
+		text.includes('gratis') ||
+		text.includes('speciaal voor u') ||
+		text.includes('bonus')
+	) {
+		return 'promotional';
+	}
+
+	// Newsletter indicators
+	if (
+		text.includes('nieuwsbrief') ||
+		text.includes('wekelijkse update') ||
+		text.includes('maandelijkse') ||
+		text.includes('nieuws van')
+	) {
+		return 'newsletter';
+	}
+
+	// Notification indicators
+	if (
+		text.includes('melding') ||
+		text.includes('herinnering') ||
+		text.includes('notificatie') ||
+		text.includes('update')
+	) {
+		return 'notification';
+	}
+
+	return 'transactional'; // Default to transactional as it usually requires action
+}
 
 // Known company patterns for categorization
 const KNOWN_COMPANIES: Record<string, { category: CompanyCategory; domain: string }> = {
@@ -95,6 +162,52 @@ function categorizeCompany(domain: string): CompanyCategory {
 
 export function extractDomainFromEmail(email: string): string {
 	return extractDomain(email);
+}
+
+/**
+ * Add email type detection to emails
+ */
+export function enrichWithEmailTypes(emails: Email[]): Email[] {
+	return emails.map(email => ({
+		...email,
+		emailType: detectEmailType(email.subject, email.body)
+	}));
+}
+
+/**
+ * Generate a summary of emails per company with type breakdown
+ */
+export function getCompanySummary(
+	companyName: string,
+	emails: Email[],
+	hasPersonalData: boolean = false
+): CompanyEmailSummary {
+	const emailTypes: Record<EmailType, number> = {
+		transactional: 0,
+		promotional: 0,
+		newsletter: 0,
+		notification: 0
+	};
+
+	let latestEmail = new Date(0);
+
+	for (const email of emails) {
+		const type = email.emailType || detectEmailType(email.subject, email.body);
+		emailTypes[type]++;
+		if (email.date > latestEmail) {
+			latestEmail = email.date;
+		}
+	}
+
+	return {
+		companyName,
+		domain: extractDomain(emails[0]?.from || ''),
+		category: categorizeCompany(extractDomain(emails[0]?.from || '')),
+		totalEmails: emails.length,
+		emailTypes,
+		latestEmail: latestEmail.getTime() > 0 ? latestEmail : new Date(),
+		hasPersonalData
+	};
 }
 
 export function groupByCompany(emails: Email[]): Map<string, Email[]> {

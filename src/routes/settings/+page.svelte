@@ -227,15 +227,15 @@
             <div class="privacy-item">
                 <span class="icon">🤖</span>
                 <div>
-                    <strong>AI Analyse</strong>
-                    <p>Gebeurt op uw eigen apparaat</p>
+                    <strong>Lokale AI</strong>
+                    <p>Qwen draait op uw eigen apparaat</p>
                 </div>
             </div>
             <div class="privacy-item">
                 <span class="icon">☁️</span>
                 <div>
-                    <strong>Cloud</strong>
-                    <p>Geen gegevens verlaten uw machine</p>
+                    <strong>Cloud AI</strong>
+                    <p>Opt-in only: GLM-5.1 via Z.AI API</p>
                 </div>
             </div>
             <div class="privacy-item">
@@ -260,6 +260,7 @@
                 <span class="tech-badge">Tauri v2</span>
                 <span class="tech-badge">SvelteKit 5</span>
                 <span class="tech-badge">Qwen 3.5</span>
+                <span class="tech-badge">GLM-5.1</span>
                 <span class="tech-badge">Rust</span>
             </div>
             <p class="description">
@@ -397,5 +398,114 @@
 
     .btn-danger:hover {
         opacity: 0.9;
+    }
+
+    /* AI Mode Selector */
+    .ai-mode-selector {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .ai-mode-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        padding: 1rem;
+        background: var(--bg);
+        border: 2px solid var(--border);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .ai-mode-option:hover {
+        border-color: var(--primary);
+    }
+
+    .ai-mode-option.selected {
+        border-color: var(--primary);
+        background: rgba(59, 130, 246, 0.1);
+    }
+
+    .ai-mode-option input {
+        margin-top: 0.25rem;
+        accent-color: var(--primary);
+    }
+
+    .mode-content {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .mode-label {
+        font-weight: 500;
+    }
+
+    .mode-desc {
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+
+    .badge-info {
+        background: var(--info, #3b82f6);
+        color: white;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+    }
+
+    /* History */
+    .history-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .history-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem;
+        background: var(--bg);
+        border-radius: 8px;
+    }
+
+    .history-date {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+
+    .history-time {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .history-stats {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+
+    .history-stats .divider {
+        color: var(--border);
+    }
+
+    .history-stats .flagged {
+        color: var(--danger);
+        font-weight: 500;
+    }
+
+    .empty-history {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        text-align: center;
+        padding: 1.5rem;
     }
 </style>

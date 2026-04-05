@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { aiService } from '$lib/services/ai';
-	import { emailService, generateMockEmails, type Email } from '$lib/services/email';
+	import { emailService, generateMockEmails, groupByCompany, type Email } from '$lib/services/email';
 	import { appStore } from '$lib/stores/app';
 	import { startOAuthFlow, hasValidTokens, type OAuthProvider } from '$lib/services/oauth';
 	import { analyzeCompanies, type ScanProgress } from '$lib/services/scan-engine';
@@ -14,7 +14,7 @@
 	let aiReady = $state(false);
 	let aiDevice = $state('loading...');
 	let isConnected = $state(hasValidTokens());
-	let selectedProvider = $state<'gmail' | 'outlook' | 'imap'>('gmail');
+	let selectedProvider = $state<'google' | 'microsoft' | 'imap'>('google');
 
 	// IMAP config
 	let imapServer = $state('');
@@ -61,7 +61,7 @@
 			scanProgress = 10;
 
 			// Group by company
-			const companies = emailService.groupByCompany(emails);
+			const companies = groupByCompany(emails);
 			scanProgress = 20;
 
 			// Analyze using Two-Tier engine
@@ -149,9 +149,9 @@
 			</button>
 		</div>
 
-		{#if selectedProvider === 'gmail' || selectedProvider === 'outlook'}
+		{#if selectedProvider === 'google' || selectedProvider === 'microsoft'}
 			<button class="btn btn-primary oauth-btn" onclick={() => startOAuth(selectedProvider)}>
-				🔐 Verbinden met {selectedProvider === 'gmail' ? 'Google' : 'Microsoft'}
+				🔐 Verbinden met {selectedProvider === 'google' ? 'Google' : 'Microsoft'}
 			</button>
 			<p class="oauth-note">
 				OAuth is veilig - uw wachtwoord wordt nooit opgeslagen.

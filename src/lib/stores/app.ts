@@ -20,7 +20,7 @@ interface AppState {
 	totalEmails: number;
 	scannedAt: Date | null;
 	settings: {
-		aiProvider: 'local' | 'cloud';
+		aiProvider: 'local' | 'hybrid' | 'cloud';
 		language: string;
 	};
 }
@@ -30,7 +30,7 @@ let state = $state<AppState>({
 	totalEmails: 0,
 	scannedAt: null,
 	settings: {
-		aiProvider: 'local',
+		aiProvider: 'hybrid', // Default: local with cloud fallback
 		language: 'nl',
 	},
 });

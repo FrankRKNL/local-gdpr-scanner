@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { appStore } from '$lib/stores/app';
+	import { appStore, type CompanyResult } from '$lib/stores/app';
 
 	const results = $derived(appStore.state.results);
 	const totalEmails = $derived(appStore.state.totalEmails);
@@ -7,6 +7,73 @@
 
 	const withPersonalData = $derived(results.filter(r => r.hasPersonalData));
 	const withoutPersonalData = $derived(results.filter(r => !r.hasPersonalData));
+
+	// Selection state
+	let selectedCompanies = $state<Set<string>>(new Set());
+	let handledCompanies = $state<Set<string>>(new Set());
+	let filterType = $state<string>('all');
+
+	// Load handled state from localStorage
+	function loadHandled() {
+		try {
+			const stored = localStorage.getItem('gdpr-handled');
+			if (stored) {
+				handledCompanies = new Set(JSON.parse(stored));
+			}
+		} catch (e) {}
+	}
+
+	function saveHandled() {
+		localStorage.setItem('gdpr-handled', JSON.stringify([...handledCompanies]));
+	}
+
+	function toggleSelect(companyName: string) {
+		if (selectedCompanies.has(companyName)) {
+			selectedCompanies.delete(companyName);
+		} else {
+			selectedCompanies.add(companyName);
+		}
+		selectedCompanies = new Set(selectedCompanies);
+	}
+
+	function selectAll() {
+		selectedCompanies = new Set(withPersonalData.map(c => c.name));
+	}
+
+	function deselectAll() {
+		selectedCompanies = new Set();
+	}
+
+	function markAsHandled(companyName: string) {
+		handledCompanies.add(companyName);
+		handledCompanies = new Set(handledCompanies);
+		saveHandled();
+	}
+
+	function generateBatchLetters() {
+		const selected = withPersonalData.filter(c => selectedCompanies.has(c.name));
+		if (selected.length === 0) return;
+
+		// Generate letters for each selected company
+		// Navigate to first company, then user can continue
+		const first = selected[0];
+		window.location.href = `/tools/avg-brief?company=${encodeURIComponent(first.name)}&domain=${encodeURIComponent(first.domain)}&batch=${encodeURIComponent(selected.map(c => c.name).join(','))}`;
+	}
+
+	// Filter by data type
+	const dataTypes = $derived([
+		'all',
+		...new Set(withPersonalData.flatMap(c => c.dataTypes))
+	]);
+
+	const filteredWithPersonalData = $derived(
+		filterType === 'all' 
+			? withPersonalData 
+			: withPersonalData.filter(c => c.dataTypes.includes(filterType))
+	);
+
+	// Init
+	loadHandled();
 </script>
 
 <div class="results">
@@ -15,13 +82,14 @@
 		{#if scannedAt}
 			<p class="scan-info">
 				{totalEmails} emails gescand • {scannedAt.toLocaleDateString('nl-NL')}
+				{scannedAt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}
 			</p>
 		{/if}
 	</section>
 
 	{#if results.length === 0}
 		<section class="empty-state card">
-			<p> Nog geen scan uitgevoerd. </p>
+			<p>Nog geen scan uitgevoerd.</p>
 			<a href="/" class="btn btn-primary">Start een scan</a>
 		</section>
 	{:else}
@@ -44,31 +112,82 @@
 
 		{#if withPersonalData.length > 0}
 			<section class="results-section">
-				<h3>⚠️ Moeten mogelijk verwijderd worden</h3>
+				<div class="section-header">
+					<h3>⚠️ Moeten mogelijk verwijderd worden</h3>
+					
+					<div class="batch-actions">
+						<span class="selection-count">
+							{selectedCompanies.size} geselecteerd
+						</span>
+						<button class="btn btn-sm" onclick={selectAll}>Alles selecteren</button>
+						<button class="btn btn-sm" onclick={deselectAll}>Deselecteren</button>
+						{#if selectedCompanies.size > 0}
+							<button class="btn btn-primary btn-sm" onclick={generateBatchLetters}>
+								📝 Brieven genereren ({selectedCompanies.size})
+							</button>
+						{/if}
+					</div>
+				</div>
+
+				<div class="filters">
+					<label class="filter-label">
+						Filter by type:
+						<select bind:value={filterType} class="filter-select">
+							{#each dataTypes as type}
+								<option value={type}>
+									{type === 'all' ? 'Alle types' : type}
+								</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+
 				<div class="company-list">
-					{#each withPersonalData as company}
-						<div class="company-card card">
-							<div class="company-header">
-								<h4>{company.name}</h4>
-								<span class="badge badge-warning">
-									{Math.round(company.confidence * 100)}% zeker
-								</span>
+					{#each filteredWithPersonalData as company}
+						<div class="company-card card" class:handled={handledCompanies.has(company.name)}>
+							<div class="company-select">
+								<input 
+									type="checkbox" 
+									checked={selectedCompanies.has(company.name)}
+									onchange={() => toggleSelect(company.name)}
+								/>
 							</div>
-							<p class="company-domain">{company.domain}</p>
-							<p class="company-emails">{company.emailCount} emails</p>
-							<div class="data-types">
-								{#each company.dataTypes as type}
-									<span class="data-type">{type}</span>
-								{/each}
-							</div>
-							<p class="summary">{company.summary}</p>
-							<div class="actions">
-								<button class="btn btn-secondary">
-									📧 Bekijk emails
-								</button>
-								<a href="/tools/avg-brief?company={encodeURIComponent(company.name)}&domain={encodeURIComponent(company.domain)}" class="btn btn-primary">
-									📝 AVG brief genereren
-								</a>
+							<div class="company-content">
+								<div class="company-header">
+									<div class="company-title">
+										<h4>{company.name}</h4>
+										{#if handledCompanies.has(company.name)}
+											<span class="handled-badge">✓ Verwerkt</span>
+										{/if}
+									</div>
+									<span class="badge badge-warning">
+										{Math.round(company.confidence * 100)}% zeker
+									</span>
+								</div>
+								<p class="company-domain">{company.domain}</p>
+								<p class="company-emails">{company.emailCount} emails</p>
+								<div class="data-types">
+									{#each company.dataTypes as type}
+										<span class="data-type">{type}</span>
+									{/each}
+								</div>
+								<p class="summary">{company.summary}</p>
+								<div class="actions">
+									<button class="btn btn-secondary btn-sm">
+										📧 Bekijk emails
+									</button>
+									<a href="/tools/avg-brief?company={encodeURIComponent(company.name)}&domain={encodeURIComponent(company.domain)}" class="btn btn-primary btn-sm">
+										📝 AVG brief
+									</a>
+									{#if !handledCompanies.has(company.name)}
+										<button 
+											class="btn btn-success btn-sm"
+											onclick={() => markAsHandled(company.name)}
+										>
+											✓ Markeer als verwerkt
+										</button>
+									{/if}
+								</div>
 							</div>
 						</div>
 					{/each}
@@ -150,9 +269,50 @@
 		font-size: 0.85rem;
 	}
 
-	.results-section h3 {
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		flex-wrap: wrap;
+		gap: 1rem;
 		margin-bottom: 1rem;
+	}
+
+	.section-header h3 {
 		font-size: 1.1rem;
+	}
+
+	.batch-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.selection-count {
+		font-size: 0.85rem;
+		color: var(--text-secondary);
+		min-width: 100px;
+	}
+
+	.filters {
+		margin-bottom: 1rem;
+	}
+
+	.filter-label {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		font-size: 0.9rem;
+	}
+
+	.filter-select {
+		padding: 0.5rem 0.75rem;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		color: var(--text);
+		font-size: 0.85rem;
 	}
 
 	.company-list {
@@ -162,6 +322,31 @@
 	}
 
 	.company-card {
+		display: flex;
+		gap: 1rem;
+		transition: opacity 0.2s;
+	}
+
+	.company-card.handled {
+		opacity: 0.6;
+		border-left: 3px solid var(--success);
+	}
+
+	.company-select {
+		display: flex;
+		align-items: flex-start;
+		padding-top: 0.25rem;
+	}
+
+	.company-select input[type="checkbox"] {
+		width: 18px;
+		height: 18px;
+		accent-color: var(--primary);
+		cursor: pointer;
+	}
+
+	.company-content {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
@@ -174,11 +359,25 @@
 	.company-header {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: flex-start;
 	}
 
-	.company-header h4 {
+	.company-title {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.company-title h4 {
 		font-size: 1.1rem;
+	}
+
+	.handled-badge {
+		background: var(--success);
+		color: white;
+		padding: 0.15rem 0.5rem;
+		border-radius: 4px;
+		font-size: 0.7rem;
 	}
 
 	.company-domain {
@@ -206,7 +405,7 @@
 		font-size: 0.75rem;
 	}
 
-	.summary {
+	p.summary {
 		color: var(--text-secondary);
 		font-size: 0.9rem;
 		font-style: italic;
@@ -215,6 +414,21 @@
 	.actions {
 		display: flex;
 		gap: 0.75rem;
-		margin-top: 0.75rem;
+		margin-top: 0.5rem;
+		flex-wrap: wrap;
+	}
+
+	.btn-sm {
+		padding: 0.4rem 0.75rem;
+		font-size: 0.8rem;
+	}
+
+	.results-section h3 {
+		margin-bottom: 0.5rem;
+		font-size: 1.1rem;
+	}
+
+	:root {
+		--success: #22c55e;
 	}
 </style>
