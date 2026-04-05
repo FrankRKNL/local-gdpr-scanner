@@ -1,8 +1,21 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import '../app.css';
+	import { onMount } from 'svelte';
+	import { theme } from '$lib/stores/theme';
 
 	let { children } = $props();
+	let currentTheme = $state('dark');
+
+	onMount(() => {
+		theme.init();
+		theme.subscribe(value => {
+			currentTheme = value;
+		});
+	});
+
+	function toggleTheme() {
+		theme.toggle();
+	}
 </script>
 
 <svelte:head>
@@ -22,6 +35,11 @@
 			<a href="/tools/avg-brief">AVG Brief</a>
 			<a href="/settings">Instellingen</a>
 		</nav>
+		<div class="header-actions">
+			<button class="theme-toggle" onclick={toggleTheme} title="Toggle theme">
+				{currentTheme === 'dark' ? '☀️' : '🌙'}
+			</button>
+		</div>
 	</header>
 
 	<main>
@@ -79,6 +97,25 @@
 
 	nav a:hover {
 		color: var(--text);
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.theme-toggle {
+		background: var(--surface-hover);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.5rem 0.75rem;
+		font-size: 1.1rem;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.theme-toggle:hover {
+		background: var(--border);
 	}
 
 	main {

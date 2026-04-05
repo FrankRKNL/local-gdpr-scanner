@@ -1,4 +1,6 @@
-:root {
+/* Default (dark) theme */
+:root,
+[data-theme="dark"] {
 	--bg: #0f0f1a;
 	--surface: #1a1a2e;
 	--surface-hover: #252542;
@@ -13,6 +15,22 @@
 	--info: #3b82f6;
 }
 
+/* Light theme */
+[data-theme="light"] {
+	--bg: #f8f9fc;
+	--surface: #ffffff;
+	--surface-hover: #f0f1f5;
+	--border: #e2e4eb;
+	--text: #1a1a2e;
+	--text-secondary: #6b6b80;
+	--primary: #4f46e5;
+	--primary-hover: #6366f1;
+	--success: #16a34a;
+	--warning: #d97706;
+	--danger: #dc2626;
+	--info: #2563eb;
+}
+
 * {
 	margin: 0;
 	padding: 0;
@@ -25,6 +43,7 @@ body {
 	color: var(--text);
 	line-height: 1.6;
 	-webkit-font-smoothing: antialiased;
+	transition: background 0.2s, color 0.2s;
 }
 
 button {
@@ -76,6 +95,7 @@ a {
 	border: 1px solid var(--border);
 	border-radius: 12px;
 	padding: 1.5rem;
+	transition: background 0.2s, border-color 0.2s;
 }
 
 .badge {
