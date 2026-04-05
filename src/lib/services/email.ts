@@ -301,77 +301,181 @@ export const emailService: EmailService = new TauriEmailService();
 
 /**
  * Generate realistic mock emails for demo/testing
+ * Realistic Dutch companies with realistic GDPR-relevant content
  */
 export function generateMockEmails(count: number): Email[] {
 	const companies = [
+		// E-commerce - has addresses, order data
 		{ from: 'noreply@bol.com', name: 'Bol.com', category: 'ecommerce' as CompanyCategory },
-		{ from: 'nieuwsbrief@nu.nl', name: 'NU.nl', category: 'newsletter' as CompanyCategory },
-		{ from: 'info@ing.nl', name: 'ING Bank', category: 'banking' as CompanyCategory },
 		{ from: 'marketing@coolblue.nl', name: 'Coolblue', category: 'ecommerce' as CompanyCategory },
-		{ from: 'noreply@linkedin.com', name: 'LinkedIn', category: 'social' as CompanyCategory },
-		{ from: 'noreply@spotify.com', name: 'Spotify', category: 'entertainment' as CompanyCategory },
+		{ from: 'noreply@ah.nl', name: 'Albert Heijn', category: 'ecommerce' as CompanyCategory },
+		{ from: 'noreply@bol.com', name: 'Bol.com', category: 'ecommerce' as CompanyCategory },
+		
+		// Banking - has financial data, IBAN, transaction history
+		{ from: 'info@ing.nl', name: 'ING Bank', category: 'banking' as CompanyCategory },
+		{ from: 'noreply@rabobank.nl', name: 'Rabobank', category: 'banking' as CompanyCategory },
+		
+		// Telecom - has address, contract details
 		{ from: 'info@kpn.nl', name: 'KPN', category: 'telecom' as CompanyCategory },
 		{ from: 'klant@ziggo.nl', name: 'Ziggo', category: 'telecom' as CompanyCategory },
-	];
-
-	const subjects = [
-		'Uw bestelling is verzonden',
-		'Herinnering: betaling openstaand',
-		'We missen u! Kom terug voor korting',
-		'Nieuwsbrief - week 14 - 2026',
-		'Uw maandelijkse overzicht',
-		'Veiligheidsmelding: nieuwe aanmelding',
-		'Uw factuur is klaar',
-		'Bekijk uw recente activiteit',
+		
+		// Social - has profile data, connections, messages
+		{ from: 'noreply@linkedin.com', name: 'LinkedIn', category: 'social' as CompanyCategory },
+		{ from: 'noreply@facebook.com', name: 'Facebook', category: 'social' as CompanyCategory },
+		
+		// Entertainment - has preferences, payment info
+		{ from: 'noreply@spotify.com', name: 'Spotify', category: 'entertainment' as CompanyCategory },
+		{ from: 'noreply@netflix.com', name: 'Netflix', category: 'entertainment' as CompanyCategory },
+		
+		// Healthcare - sensitive medical data
+		{ from: 'noreply@bol.com', name: 'Bol.com', category: 'ecommerce' as CompanyCategory },
+		
+		// Newsletter - mostly safe, just marketing
+		{ from: 'nieuwsbrief@nu.nl', name: 'NU.nl', category: 'newsletter' as CompanyCategory },
 	];
 
 	const mockEmails: Email[] = [];
 
 	for (let i = 0; i < count; i++) {
 		const company = companies[Math.floor(Math.random() * companies.length)];
-		const subject = subjects[Math.floor(Math.random() * subjects.length)];
 		const daysAgo = Math.floor(Math.random() * 90);
+		
+		// Mix of email types per company
+		const emailType = Math.random();
+		let subject: string;
+		let body: string;
+		
+		if (company.category === 'ecommerce') {
+			if (emailType < 0.3) {
+				subject = 'Uw bestelling is verzonden';
+				body = `Beste klant,
+
+Uw bestelling bij ${company.name} is verwerkt.
+
+Bestelnummer: ORD-2026-${10000 + i}
+Product: Diverse artikelen
+Totaalbedrag: EUR ${(Math.random() * 100 + 20).toFixed(2)}
+
+Levering binnen 1-2 werkdagen.
+
+Met vriendelijke groet,
+${company.name} Klantenservice`;
+			} else if (emailType < 0.6) {
+				subject = 'Factuur voor uw bestelling';
+				body = `Geachte heer/mevrouw,
+
+Hierbij ontvangt u de factuur voor uw bestelling.
+
+Bedrag: EUR ${(Math.random() * 150 + 10).toFixed(2)}
+Factuurdatum: ${new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toLocaleDateString('nl-NL')}
+KvK: 30145340
+
+Met vriendelijke groet,
+${company.name}`;
+			} else {
+				subject = 'We missen u! Kom terug voor korting';
+				body = `Beste klant,
+
+Het is alweer een tijdje geleden dat u bij ons shopte.
+
+Ontdek onze nieuwe collectie met 20% korting!
+
+Met vriendelijke groet,
+${company.name}`;
+			}
+		} else if (company.category === 'banking') {
+			if (emailType < 0.4) {
+				subject = 'Uw maandelijkse overzicht';
+				body = `Geachte relatie,
+
+Uw maandelijkse overzicht van ${new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' })}.
+
+Rekeningnummer: NL91 ABNA 0417 1643 00
+Saldo: EUR ${(Math.random() * 5000 + 500).toFixed(2)}
+
+Met vriendelijke groet,
+${company.name}`;
+			} else if (emailType < 0.7) {
+				subject = 'Betaling ontvangen';
+				body = `Geachte heer/mevrouw,
+
+Wij hebben uw betaling ontvangen.
+
+Bedrag: EUR ${(Math.random() * 500 + 50).toFixed(2)}
+Van: IBAN NL91 ABNA 0417 1643 00
+
+Met vriendelijke groet,
+${company.name}`;
+			} else {
+				subject = 'Nieuwe aanmelding gedetecteerd';
+				body = `Geachte heer/mevrouw,
+
+Wij hebben een nieuwe aanmelding gedetecteerd op uw account.
+
+Apparaat: Windows PC
+Locatie: Wijhe, Nederland
+Tijd: ${new Date().toLocaleTimeString('nl-NL')}
+
+Was u dit niet? Neem dan contact met ons op.
+
+Met vriendelijke groet,
+${company.name}`;
+			}
+		} else if (company.category === 'telecom') {
+			subject = 'Uw factuur is klaar';
+			body = `Geachte klant,
+
+Uw factuur voor ${new Date().toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' })}.
+
+Klantnummer: KL${100000 + i}
+Factuurbedrag: EUR ${(Math.random() * 60 + 25).toFixed(2)}
+IBAN: NL91 ABNA 0417 1643 00
+
+Met vriendelijke groet,
+${company.name}`;
+		} else if (company.category === 'social') {
+			subject = 'U heeft een nieuw bericht';
+			body = `Hallo,
+
+U heeft een nieuw bericht ontvangen.
+
+Naam afzender: Jan Jansen
+Email: jan.jansen@example.com
+
+Bekijk uw berichten op ${company.name}.
+
+Met vriendelijke groet,
+${company.name}`;
+		} else if (company.category === 'entertainment') {
+			subject = 'Uw betaling is geslaagd';
+			body = `Bedankt voor uw abonnement, ${company.name} Premium.
+
+Betaalmethode: Visa eindigend op 1234
+Bedrag: EUR ${(Math.random() * 15 + 5).toFixed(2)}/maand
+
+Met vriendelijke groet,
+${company.name}`;
+		} else {
+			subject = 'Nieuwsbrief week 14 - 2026';
+			body = `De belangrijkste nieuwsberichten van deze week, samengevat voor u.
+
+Meer nieuws op nu.nl
+
+Met vriendelijke groet,
+${company.name}`;
+		}
 
 		mockEmails.push({
 			id: crypto.randomUUID(),
 			from: company.from,
 			fromName: company.name,
 			to: 'user@example.com',
-			subject: `${subject} #${i + 1}`,
+			subject: subject,
 			date: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
-			body: generateMockBody(company.category, company.name),
+			body: body,
 			hasAttachments: false,
 		});
 	}
 
 	return mockEmails.sort((a, b) => b.date.getTime() - a.date.getTime());
-}
-
-function generateMockBody(category: CompanyCategory, companyName: string): string {
-	switch (category) {
-		case 'ecommerce':
-			return `Beste klant,
-
-Uw bestelling bij ${companyName} is verwerkt. Levering binnen 1-2 werkdagen.
-
-Met vriendelijke groet,
-${companyName} Klantenservice`;
-		case 'banking':
-			return `Uw ${companyName} overzicht is beschikbaar.
-
-Bekijk de details in de app.
-
-Met vriendelijke groet,
-${companyName}`;
-		case 'newsletter':
-			return `De belangrijkste nieuwsberichten van vandaag, samengevat voor u door ${companyName}.`;
-		case 'social':
-			return `${companyName} nieuws: Uw netwerk groeit. Bekijk wie uw berichten heeft gezien.`;
-		case 'entertainment':
-			return `Ontdek nieuwe content op ${companyName}. Aanbevelingen op maat voor u.`;
-		case 'telecom':
-			return `Uw ${companyName} factuur staat klaar. Bekijk de details in Mijn ${companyName}.`;
-		default:
-			return `Bedankt voor uw bericht. Wij nemen zo snel mogelijk contact met u op.`;
-	}
 }
