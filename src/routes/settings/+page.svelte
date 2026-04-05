@@ -1,5 +1,6 @@
 <script lang="ts">
     import { appStore } from '$lib/stores/app';
+    import { aiService } from '$lib/services/ai';
 
     const settings = $derived(appStore.state.settings);
 
@@ -12,6 +13,50 @@
         { code: 'en', name: 'English' },
         { code: 'de', name: 'Deutsch' },
     ];
+
+    // AI mode options
+    const aiModes = [
+        { value: 'local', label: 'Alleen lokaal (Qwen 3.5)', description: '100% privaat, geen internet' },
+        { value: 'hybrid', label: 'Hybrid (Qwen + GLM-5.1)', description: 'Snel lokaal, cloud fallback' },
+        { value: 'cloud', label: 'Alleen cloud (GLM-5.1)', description: 'Snelste resultaten, vereist internet' },
+    ];
+
+    // Scan history
+    interface ScanHistoryEntry {
+        id: string;
+        date: Date;
+        companyCount: number;
+        emailCount: number;
+        flaggedCount: number;
+    }
+
+    let scanHistory = $state<ScanHistoryEntry[]>([]);
+
+    // Load scan history from localStorage
+    function loadHistory() {
+        try {
+            const stored = localStorage.getItem('gdpr-scan-history');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                scanHistory = parsed.map((e: any) => ({
+                    ...e,
+                    date: new Date(e.date),
+                }));
+            }
+        } catch (e) {
+            console.error('Failed to load history:', e);
+        }
+    }
+
+    // Save scan history to localStorage
+    function saveHistory(entry: Omit<ScanHistoryEntry, 'id'>) {
+        const newEntry: ScanHistoryEntry = {
+            ...entry,
+            id: crypto.randomUUID(),
+        };
+        scanHistory = [newEntry, ...scanHistory].slice(0, 10); // Keep last 10
+        localStorage.setItem('gdpr-scan-history', JSON.stringify(scanHistory));
+    }
 
     // Data export
     function exportResults() {
@@ -40,7 +85,7 @@
 
         // CSV rows
         for (const r of results) {
-            csv += `"${r.name}","${r.domain}",${r.emailCount},${r.hasPersonalData ? 'Ja' : 'Nee'},"${r.dataTypes.join('; ')}",${Math.round(r.confidence * 100)}\n`;
+            csv += `"${r.name}","${r.domain}",${r.emailCount},${r.hasPersonalData ? 'Ja' : 'Nee'}","${r.dataTypes.join('; ')}",${Math.round(r.confidence * 100)}\n`;
         }
 
         const blob = new Blob([csv], { type: 'text/csv' });
@@ -51,6 +96,14 @@
         a.click();
         URL.revokeObjectURL(url);
     }
+
+    function clearHistory() {
+        scanHistory = [];
+        localStorage.removeItem('gdpr-scan-history');
+    }
+
+    // Init
+    loadHistory();
 </script>
 
 <div class="settings">
@@ -59,22 +112,72 @@
     <section class="settings-section card">
         <h3>AI Model</h3>
         <p class="description">
-            Het AI model draait volledig lokaal op uw apparaat.
+            Kies hoe uw emails geanalyseerd worden.
         </p>
+        
+        <div class="ai-mode-selector">
+            {#each aiModes as mode}
+                <label class="ai-mode-option" class:selected={settings.aiProvider === mode.value}>
+                    <input 
+                        type="radio" 
+                        name="aiMode" 
+                        value={mode.value}
+                        bind:group={settings.aiProvider}
+                    />
+                    <div class="mode-content">
+                        <span class="mode-label">{mode.label}</span>
+                        <span class="mode-desc">{mode.description}</span>
+                    </div>
+                </label>
+            {/each}
+        </div>
+
         <div class="info-grid">
             <div class="info-row">
-                <span>Model</span>
+                <span>Lokaal model</span>
                 <span class="badge badge-success">Qwen 3.5 0.8B</span>
             </div>
             <div class="info-row">
-                <span>Locatie</span>
-                <span>Transformers.js (WebGPU/WASM)</span>
+                <span>Cloud model</span>
+                <span class="badge badge-info">GLM-5.1 (Z.AI)</span>
             </div>
             <div class="info-row">
-                <span>Data verzenden</span>
-                <span class="badge badge-danger">Nooit</span>
+                <span>Locatie</span>
+                <span>{settings.aiProvider === 'local' ? 'Alleen lokaal' : settings.aiProvider === 'cloud' ? 'Alleen cloud' : 'Hybrid (lokaal + cloud)'}</span>
             </div>
         </div>
+    </section>
+
+    <section class="settings-section card">
+        <h3>Scan Geschiedenis</h3>
+        <p class="description">
+            Uw recente scans worden hier opgeslagen.
+        </p>
+        
+        {#if scanHistory.length > 0}
+            <div class="history-list">
+                {#each scanHistory as entry}
+                    <div class="history-item">
+                        <div class="history-date">
+                            {entry.date.toLocaleDateString('nl-NL')}
+                            <span class="history-time">{entry.date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <div class="history-stats">
+                            <span>{entry.companyCount} bedrijven</span>
+                            <span class="divider">•</span>
+                            <span>{entry.emailCount} emails</span>
+                            <span class="divider">•</span>
+                            <span class="flagged">{entry.flaggedCount} gevlagd</span>
+                        </div>
+                    </div>
+                {/each}
+            </div>
+            <button class="btn btn-secondary" onclick={clearHistory}>
+                Geschiedenis wissen
+            </button>
+        {:else}
+            <p class="empty-history">Nog geen scans uitgevoerd.</p>
+        {/if}
     </section>
 
     <section class="settings-section card">

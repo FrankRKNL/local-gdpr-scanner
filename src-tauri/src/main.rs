@@ -84,6 +84,9 @@ fn main() {
             local_gdpr_scanner_lib::email::parse_emails,
             // Fast data detection
             local_gdpr_scanner_lib::fast_scan::fast_detect,
+            // AI Agent actions
+            local_gdpr_scanner_lib::actions::execute_action,
+            local_gdpr_scanner_lib::actions::execute_batch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
