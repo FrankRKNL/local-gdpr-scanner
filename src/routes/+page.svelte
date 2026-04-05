@@ -49,6 +49,11 @@
 		}
 	}
 
+	async function startOAuthIfValid(provider: 'google' | 'microsoft' | 'imap') {
+		if (provider === 'imap') return;
+		await startOAuthFlow(provider);
+	}
+
 	async function startScan() {
 		isScanning = true;
 		scanProgress = 0;
@@ -128,15 +133,15 @@
 		<div class="provider-buttons">
 			<button
 				class="provider-btn"
-				class:active={selectedProvider === 'gmail'}
-				onclick={() => selectedProvider = 'gmail'}
+				class:active={selectedProvider === 'google'}
+				onclick={() => selectedProvider = 'google'}
 			>
 				Gmail
 			</button>
 			<button
 				class="provider-btn"
-				class:active={selectedProvider === 'outlook'}
-				onclick={() => selectedProvider = 'outlook'}
+				class:active={selectedProvider === 'microsoft'}
+				onclick={() => selectedProvider = 'microsoft'}
 			>
 				Outlook
 			</button>
@@ -150,7 +155,7 @@
 		</div>
 
 		{#if selectedProvider === 'google' || selectedProvider === 'microsoft'}
-			<button class="btn btn-primary oauth-btn" onclick={() => startOAuth(selectedProvider)}>
+			<button class="btn btn-primary oauth-btn" onclick={() => startOAuthIfValid(selectedProvider)}>
 				🔐 Verbinden met {selectedProvider === 'google' ? 'Google' : 'Microsoft'}
 			</button>
 			<p class="oauth-note">
