@@ -17,6 +17,7 @@ let worker: Worker | null = null;
 let loadingCallbacks: LoadingCallback[] = [];
 let pendingResults: Map<string, ResultCallback> = new Map();
 let conversationCounter = 0;
+let usingCloudFallback = false;
 
 export function onLoadingProgress(cb: LoadingCallback) {
     loadingCallbacks.push(cb);
@@ -50,6 +51,7 @@ export async function init(): Promise<boolean> {
                         notifyLoading(data.progress || 50, data.status);
                         break;
                     case 'loaded':
+                        usingCloudFallback = data.cloudFallback || false;
                         resolve(data.success);
                         break;
                     case 'result':
@@ -86,7 +88,8 @@ export function getLoadError(): string | null {
 }
 
 export function getDevice(): string {
-    return worker ? 'worker' : 'none';
+    if (!worker) return 'none';
+    return usingCloudFallback ? 'glm-cloud' : 'qwen-local';
 }
 
 /**
