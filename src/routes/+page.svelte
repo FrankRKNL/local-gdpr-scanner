@@ -1,13 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { aiService, type AIResult } from '$lib/services/ai';
+	import { aiService } from '$lib/services/ai';
 	import { emailService, generateMockEmails, type Email } from '$lib/services/email';
 	import { appStore } from '$lib/stores/app';
 	import { startOAuthFlow, hasValidTokens, type OAuthProvider } from '$lib/services/oauth';
+	import { analyzeCompanies, type ScanProgress } from '$lib/services/scan-engine';
 
 	let emails: Email[] = $state([]);
 	let isScanning = $state(false);
 	let scanProgress = $state(0);
+	let currentPhase = $state<'regex' | 'nlp' | 'done'>('regex');
+	let currentCompany = $state('');
 	let aiReady = $state(false);
 	let aiDevice = $state('loading...');
 	let isConnected = $state(hasValidTokens());
@@ -32,6 +35,12 @@
 		aiDevice = aiService.getDevice();
 	});
 
+	function handleScanProgress(progress: ScanProgress) {
+		currentCompany = progress.company;
+		currentPhase = progress.phase;
+		scanProgress = progress.progress;
+	}
+
 	async function startOAuth(provider: OAuthProvider) {
 		try {
 			await startOAuthFlow(provider);
@@ -49,29 +58,30 @@
 			// For demo: use mock data
 			// In production: use emailService to connect via IMAP/OAuth
 			emails = generateMockEmails(20);
-			scanProgress = 30;
+			scanProgress = 10;
 
 			// Group by company
 			const companies = emailService.groupByCompany(emails);
-			scanProgress = 50;
+			scanProgress = 20;
 
-			// Analyze each company with local AI (via worker)
-			const results: AIResult[] = [];
-			const companyEntries = Array.from(companies.entries());
-			const total = companyEntries.length;
+			// Analyze using Two-Tier engine
+			const results = await analyzeCompanies(companies, handleScanProgress);
 
-			for (let i = 0; i < companyEntries.length; i++) {
-				const [companyName, companyEmails] = companyEntries[i];
-				const result = await aiService.analyzeCompany(
-					companyName,
-					companyEmails.map(e => ({ subject: e.subject, body: e.body }))
-				);
-				results.push(result);
-				scanProgress = 50 + Math.round((i / total) * 50);
+			// Convert to app store format
+			const companyMap = new Map<string, Email[]>();
+			for (const [name, emls] of companies) {
+				companyMap.set(name, emls);
 			}
+			
+			// Create AI result format for store
+			const aiResults = results.map(r => ({
+				hasPersonalData: r.hasPersonalData,
+				dataTypes: r.dataTypes,
+				confidence: r.confidence,
+				summary: r.summary,
+			}));
 
-			// Store results
-			appStore.setResults(companies, results);
+			appStore.setResults(companyMap, aiResults);
 			scanProgress = 100;
 
 		} catch (error) {
@@ -188,11 +198,24 @@
 
 	{#if isScanning}
 		<section class="progress-section card">
-			<h3>Scannen in progress...</h3>
+			<h3>
+				{#if currentPhase === 'regex'}
+					Snelle scan (regex)...
+				{:else if currentPhase === 'nlp'}
+					Diepe analyse (AI)...
+				{:else}
+					Scan voltooid!
+				{/if}
+			</h3>
+			<p class="scan-company">{currentCompany || 'Starten...'}</p>
 			<div class="progress-bar">
 				<div class="progress-fill" style="width: {scanProgress}%"></div>
 			</div>
 			<p>{scanProgress}%</p>
+			<div class="scan-tiers">
+				<span class="tier" class:active={currentPhase === 'regex'}>⚡ Regex</span>
+				<span class="tier" class:active={currentPhase === 'nlp'}>🤖 NLP</span>
+			</div>
 		</section>
 	{/if}
 
@@ -329,7 +352,34 @@
 	}
 
 	.progress-section h3 {
+		margin-bottom: 0.5rem;
+	}
+
+	.scan-company {
+		color: var(--text-secondary);
+		font-size: 0.9rem;
 		margin-bottom: 1rem;
+	}
+
+	.scan-tiers {
+		display: flex;
+		gap: 1rem;
+		justify-content: center;
+		margin-top: 0.75rem;
+	}
+
+	.scan-tiers .tier {
+		padding: 0.25rem 0.75rem;
+		background: var(--surface-hover);
+		border-radius: 9999px;
+		font-size: 0.8rem;
+		opacity: 0.5;
+	}
+
+	.scan-tiers .tier.active {
+		opacity: 1;
+		background: var(--primary);
+		color: white;
 	}
 
 	.progress-bar {
